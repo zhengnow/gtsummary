@@ -391,9 +391,7 @@ safe_model_construction <- function(formula, method, data, method.args) {
           expr(with),
           data = data,
           expr =
-            list(method, formula = as.formula(formula)) %>%
-            c(as.list(method.args)[-1]) %>%
-            as.call()
+            expr((!!method)(formula = !!as.formula(formula), !!!method.args))
         )
     )
 
