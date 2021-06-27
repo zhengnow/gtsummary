@@ -110,7 +110,7 @@ tbl_uvregression <- function(data, method, y = NULL, x = NULL, method.args = NUL
 
   # checking input -------------------------------------------------------------
   # data is a data frame
-  if (!is.data.frame(data) && !is_survey(data)) {
+  if (!is.data.frame(data) && !is_survey(data) && !inherits(data, "mids")) {
     stop("`data` argument must be a data frame or survey object.", call. = FALSE)
   }
   check_haven_labelled(data)
@@ -150,8 +150,7 @@ tbl_uvregression <- function(data, method, y = NULL, x = NULL, method.args = NUL
            tryCatch({
              .select_to_varnames(
                select = !!x,
-               data = switch(is.data.frame(data), data) %||%
-                 .remove_survey_cols(data),
+               data = .extract_data_frame(data),
                arg_name = "x"
              ) %>%
                rlang::sym()},
@@ -164,8 +163,7 @@ tbl_uvregression <- function(data, method, y = NULL, x = NULL, method.args = NUL
            tryCatch({
              .select_to_varnames(
                select = !!y,
-               data = switch(is.data.frame(data), data) %||%
-                 .remove_survey_cols(data),
+               data = .extract_data_frame(data),
                arg_name = "y"
              ) %>%
                rlang::sym()},
@@ -186,25 +184,19 @@ tbl_uvregression <- function(data, method, y = NULL, x = NULL, method.args = NUL
   include <-
     .select_to_varnames(
       select = {{ include }},
-      data = switch(is.data.frame(data),
-        data
-      ) %||% .remove_survey_cols(data),
+      data = .extract_data_frame(data),
       arg_name = "include"
     )
   exclude <-
     .select_to_varnames(
       select = {{ exclude }},
-      data = switch(is.data.frame(data),
-        data
-      ) %||% .remove_survey_cols(data),
+      data = .extract_data_frame(data),
       arg_name = "exclude"
     )
   show_single_row <-
     .select_to_varnames(
       select = {{ show_single_row }},
-      data = switch(is.data.frame(data),
-        data
-      ) %||% .remove_survey_cols(data),
+      data = .extract_data_frame(data),
       arg_name = "show_single_row"
     )
 
@@ -236,9 +228,7 @@ tbl_uvregression <- function(data, method, y = NULL, x = NULL, method.args = NUL
   label <-
     .formula_list_to_named_list(
       x = label,
-      data = switch(is.data.frame(data),
-        data
-      ) %||% .remove_survey_cols(data),
+      data = .extract_data_frame(data),
       arg_name = "label"
     )
 
@@ -256,9 +246,7 @@ tbl_uvregression <- function(data, method, y = NULL, x = NULL, method.args = NUL
 
   # get all vars not specified -------------------------------------------------
   all_vars <-
-    names(switch(is.data.frame(data),
-      data
-    ) %||% .remove_survey_cols(data)) %>%
+    names(.extract_data_frame(data)) %>%
     # removing x or y variable
     setdiff(paste(c(y, x), "~ 1") %>% stats::as.formula() %>% all.vars()) %>%
     # removing any other variables listed in the formula
@@ -381,13 +369,33 @@ tbl_uvregression <- function(data, method, y = NULL, x = NULL, method.args = NUL
 
 # function to safely build and evaluate model, with nicer error messaging
 safe_model_construction <- function(formula, method, data, method.args) {
+  data_type <-
+    case_when(
+      is.data.frame(data) ~ "data.frame",
+      is_survey(data) ~ "survey",
+      inherits(data, "mids") ~ "mice"
+    )
   # defining formula and data call (or formula and design)
   call_list <-
-    switch(is.data.frame(data),
-      list(method, formula = as.formula(formula), data = data)
-    ) %||%
-    list(method, formula = as.formula(formula), design = data) %>%
-    c(as.list(method.args)[-1])
+    switch(
+      data_type,
+      "data.frame" =
+        list(method, formula = as.formula(formula), data = data) %>%
+        c(as.list(method.args)[-1]) %>%
+        as.call(),
+      "survey" =
+        list(method, formula = as.formula(formula), design = data) %>%
+        c(as.list(method.args)[-1]),
+      "mice" =
+        list(
+          expr(with),
+          data = data,
+          expr =
+            list(method, formula = as.formula(formula)) %>%
+            c(as.list(method.args)[-1]) %>%
+            as.call()
+        )
+    )
 
   # evaluate model
   tryCatch(
@@ -399,7 +407,8 @@ safe_model_construction <- function(formula, method, data, method.args) {
       } else {
         call_list$data <- expr(.)
       }
-      call_chr <- call_list %>%
+      call_chr <-
+        call_list %>%
         as.call() %>%
         rlang::expr_text()
 
@@ -411,4 +420,14 @@ safe_model_construction <- function(formula, method, data, method.args) {
       abort(as.character(e))
     }
   )
+}
+
+.extract_data_frame <- function(data) {
+  if (is.data.frame(data)) return(data)
+  if (is_survey(data)) return(.remove_survey_cols(data))
+  if (inherits(data, "mids")) {
+    assert_package("mice", "pool_and_tidy_mice()", version = "3.10.0")
+    return(mice::complete(data, action = 0L))
+  }
+  stop("data type not supported.", call. = FALSE)
 }
