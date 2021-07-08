@@ -381,8 +381,7 @@ safe_model_construction <- function(formula, method, data, method.args) {
       data_type,
       "data.frame" =
         list(method, formula = as.formula(formula), data = data) %>%
-        c(as.list(method.args)[-1]) %>%
-        as.call(),
+        c(as.list(method.args)[-1]),
       "survey" =
         list(method, formula = as.formula(formula), design = data) %>%
         c(as.list(method.args)[-1]),
