@@ -1,5 +1,7 @@
 
 library(tidyr)
+library(devtools)
+devtools::install_github("zhengnow/gtsummary", ref="add_n_cluster")
 
 load(here::here("data-raw","dwi_long.RData"))
 dat <- dt_long %>%
@@ -27,14 +29,9 @@ tab0 <-
   gtsummary::tbl_svysummary(
     by = higrade)
 
-tab0 <-
-  svydat %>%
-  tbl_svysummary_test(
-    by = higrade)
-
 tab1 <-
-   tab0%>%
-  add_n()
+   tab0 %>%
+  gtsummary::add_n()
 
 tab2 <-
   tab0 %>%
@@ -63,13 +60,13 @@ tab3 <-
 
 
 
-tab2 <-
-survey::svytable(~dat$rad1_t2_bin, design=svydat) %>%
-  as_tibble()
+# tab2 <-
+# survey::svytable(~dat$rad1_t2_bin, design=svydat) %>%
+#   as_tibble()
 
-
-var.data <-
-  cbind(svydat$variables$rad1_dwi_bin, data$cluster, svydat$variables$higrade)%>%
-  as_tibble()
+#
+# var.data <-
+#   cbind(svydat$variables$rad1_dwi_bin, data$cluster, svydat$variables$higrade)%>%
+#   as_tibble()
 
 

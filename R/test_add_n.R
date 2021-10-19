@@ -188,49 +188,51 @@ stat_to_label <- function(x) {
 
 #' @export
 #' @rdname add_n.tbl_summary
-add_n.tbl_svysummary <- function(x, data = NULL, cluster.n = FALSE, ...) {
-  updated_call_list <- c(x$call_list, list(add_n.tbl_summary() = match.call())
+add_n.tbl_svysummary <- add_n.tbl_summary
 
-  if (cluster.n == TRUE & is.null(data)) {
-    abort("The survey object is needed to report cluster number. Assign svydesign object to data")
-  }
-  x$table_body$N_cluster <- NA_integer_
-
-  if (cluster.n == TRUE) {
-    x$table_body$stat_n_cluster <- ifelse(x$table_body$row_type == "label",
-                                          data.table::uniqueN(data$cluster),
-                                  x$table_body$stat_n
-    )
-  }
-  if ("n_obs" %in% names(x$table_body)) {
-    x$table_body$stat_n <- ifelse(x$table_body$row_type == "level",
-                                  x$table_body$n_obs %>% as.integer(),
-                                  x$table_body$stat_n
-    )
-  }
-
-  x <-
-    x %>%
-    modify_table_body(
-      mutate,
-      stat_n =
-        case_when(
-          !"level" %in% .env$location & .data$row_type %in% "level" ~ NA_integer_,
-          !"label" %in% .env$location & .data$row_type %in% "label" &
-            .data$var_type %in% c("categorical", "dichotomous") ~ NA_integer_,
-          TRUE ~ .data$stat_n
-        )
-    ) %>%
-    modify_table_body(
-      dplyr::relocate,
-      .data$stat_n,
-      .after = .data$label
-    ) %>%
-    modify_header(stat_n ~ "**N**")
-
-  x$call_list <- updated_call_list
-  x
-}
+# function(x, data = NULL, cluster.n = FALSE, ...) {
+#   updated_call_list <- c(x$call_list, list(add_n.tbl_summary() = match.call())
+#
+#   if (cluster.n == TRUE & is.null(data)) {
+#     abort("The survey object is needed to report cluster number. Assign svydesign object to data")
+#   }
+#   x$table_body$N_cluster <- NA_integer_
+#
+#   if (cluster.n == TRUE) {
+#     x$table_body$stat_n_cluster <- ifelse(x$table_body$row_type == "label",
+#                                           data.table::uniqueN(data$cluster),
+#                                   x$table_body$stat_n
+#     )
+#   }
+#   if ("n_obs" %in% names(x$table_body)) {
+#     x$table_body$stat_n <- ifelse(x$table_body$row_type == "level",
+#                                   x$table_body$n_obs %>% as.integer(),
+#                                   x$table_body$stat_n
+#     )
+#   }
+#
+#   x <-
+#     x %>%
+#     modify_table_body(
+#       mutate,
+#       stat_n =
+#         case_when(
+#           !"level" %in% .env$location & .data$row_type %in% "level" ~ NA_integer_,
+#           !"label" %in% .env$location & .data$row_type %in% "label" &
+#             .data$var_type %in% c("categorical", "dichotomous") ~ NA_integer_,
+#           TRUE ~ .data$stat_n
+#         )
+#     ) %>%
+#     modify_table_body(
+#       dplyr::relocate,
+#       .data$stat_n,
+#       .after = .data$label
+#     ) %>%
+#     modify_header(stat_n ~ "**N**")
+#
+#   x$call_list <- updated_call_list
+#   x
+# }
 
 #' Add column with number of observations
 #'
