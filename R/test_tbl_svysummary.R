@@ -86,7 +86,7 @@
 #' \if{html}{Example 2}
 #'
 #' \if{html}{\figure{tbl_svysummary_ex2.png}{options: width=36\%}}
-tbl_svysummary <- function(data, by = NULL, label = NULL, statistic = NULL,
+tbl_svysummary_test <- function(data, by = NULL, label = NULL, statistic = NULL,
                            digits = NULL, type = NULL, value = NULL,
                            missing = NULL, missing_text = NULL, sort = NULL,
                            percent = NULL, include = everything()) {
@@ -222,6 +222,7 @@ tbl_svysummary <- function(data, by = NULL, label = NULL, statistic = NULL,
       meta_data = meta_data,
       inputs = tbl_summary_inputs,
       N = nrow(data),
+      N_cluster = data.table::uniqueN(data$cluster),
       call_list = list(tbl_summary = match.call()),
       by = by,
       df_by = df_by(data, by)
@@ -244,7 +245,7 @@ tbl_svysummary <- function(data, by = NULL, label = NULL, statistic = NULL,
   if (is.null(by)) {
     x <- modify_header(
       x,
-      stat_0 = "**N = {style_number(N)}**",
+      stat_0 = "**N = {style_number(N)}, \n N cluster = {style_number(N_cluster)}**",
       label = paste0("**", translate_text("Characteristic"), "**")
     )
   } else {
@@ -271,73 +272,145 @@ tbl_svysummary <- function(data, by = NULL, label = NULL, statistic = NULL,
 is_survey <- function(data) {
   return(inherits(data, "survey.design") | inherits(data, "svyrep.design"))
 }
+
+# summarize_categorical for survey design --------------------------------------
+summarize_categorical_survey <- function(data, variable, by,
+                                         dichotomous_value, sort, percent, stat_display) {
+  df_stats <-
+    summarize_categorical(
+      data = data$variables, variable = variable, by = by,
+      dichotomous_value = dichotomous_value,
+      sort = sort, percent = percent, stat_display = stat_display
+    ) %>%
+    rename(n_unweighted = .data$n, N_unweighted = .data$N, p_unweighted = .data$p)
+
+
+  # if there is a dichotomous value, it needs to be present as a level of the variable for svytable
+  if (!is.null(dichotomous_value) && !dichotomous_value %in% unique(data$variables[[variable]])) {
+    data$variables[[variable]] <- as.factor(data$variables[[variable]])
+    levels(data$variables[[variable]]) <- c(levels(data$variables[[variable]]), dichotomous_value)
+  }
+
+
+
+  if (is.null(by)) {
+    # merge cluster id and variable into a tibble
+    var.data <-
+      cbind(variable, data$cluster) %>%
+      as_tibble()
+
+    svy_table <- survey::svytable(c_form(right = variable), data) %>%
+      as_tibble() %>%
+      mutate(
+        ncluster =
+          unique(
+            data.table::as.data.table(var.data)[, count := data.table::uniqueN(var.data[,2]), by = variable]
+          )$count) %>%
+      set_names("variable_levels", "n", "N_cluster")
+  } else {
+    # merge cluster id and variable+by into a tibble
+    var.data <-
+      cbind(variable, data$cluster, by) %>%
+      as_tibble()
+
+    svy_table <- survey::svytable(c_form(right = c(by, variable)), data) %>%
+      as_tibble() %>%
+      mutate(
+        ncluster =
+          unique(
+            data.table::as.data.table(var.data)[, count := data.table::uniqueN(var.data[,2]), by = c(by, variable)]
+          )$count
+      )
+    set_names("by", "variable_levels", "n", "N_cluster")
+  }
+
+  svy_table <- svy_table %>%
+    mutate(
+      variable = as.character(variable),
+    )
+
+  # calculating percent
+  group_by_percent <- switch(percent,
+                             "cell" = "",
+                             "column" = ifelse(!is.null(by), "by", ""),
+                             "row" = "variable_levels"
+  )
+
+  svy_table <- svy_table %>%
+    group_by(!!!syms(group_by_percent)) %>%
+    mutate(
+      N = sum(.data$n),
+      # if the Big N is 0, there is no denom so making percent NA
+      p = ifelse(.data$N == 0, NA, .data$n / .data$N),
+      N_cluster = .data$N_cluster
+    ) %>%
+    ungroup()
+
+  if (!is.null(dichotomous_value)) {
+    svy_table <- svy_table %>%
+      filter(.data$variable_levels == !!dichotomous_value) %>%
+      select(-.data$variable_levels)
+  }
+
+  suppressMessages(
+    df_stats <- df_stats %>%
+      left_join(svy_table)
+  )
+
+  df_stats <-
+    df_stats %>%
+    mutate(stat_display = .env$stat_display) %>%
+    select(any_of(c("by", "variable", "variable_levels", "stat_display")), everything())
+
+  # returning final object
+  df_stats
+}
+
+##
+# compute_survey_ncluster <- function(data, variable, by, n_cluster = TRUE) {
+#   # difftime variable needs to be transformed into numeric for svyquantile
+#   if (inherits(data$variables[[variable]], "difftime")) {
+#     data$variables[[variable]] <- unclass(data$variables[[variable]])
+#   }
 #
-# # summarize_categorical for survey design --------------------------------------
-# summarize_categorical_survey <- function(data, variable, by,
-#                                          dichotomous_value, sort, percent, stat_display) {
-#   df_stats <-
-#     summarize_categorical(
-#       data = data$variables, variable = variable, by = by,
-#       dichotomous_value = dichotomous_value,
-#       sort = sort, percent = percent, stat_display = stat_display
-#     ) %>%
-#     rename(n_unweighted = .data$n, N_unweighted = .data$N, p_unweighted = .data$p)
+#   args <- list(
+#     design = data,
+#     na.rm = TRUE,
+#     keep.var = FALSE
+#   )
 #
-#   # if there is a dichotomous value, it needs to be present as a level of the variable for svytable
-#   if (!is.null(dichotomous_value) && !dichotomous_value %in% unique(data$variables[[variable]])) {
-#     data$variables[[variable]] <- as.factor(data$variables[[variable]])
-#     levels(data$variables[[variable]]) <- c(levels(data$variables[[variable]]), dichotomous_value)
+#   # if all values are NA, turn na.rm to FALSE to avoid error
+#   if (all(is.na(data$variables[[variable]]))) {
+#     args$na.rm <- FALSE
+#   }
+#
+#   if (!is.logical(n_cluster)) {
+#     stop("Only TRUE or FALSE is supported for n cluster object.", call. = FALSE)
+#   }
+#
+#   fun <- NULL
+#   if (n_cluster == TRUE) {
+#     fun <- length(unique(data$cluster))
 #   }
 #
 #   if (is.null(by)) {
-#     svy_table <- survey::svytable(c_form(right = variable), data) %>%
-#       as_tibble() %>%
-#       set_names("variable_levels", "n")
+#     args$x <- c_form(right = variable)
+#     stat <- do.call(fun, args)
+#     stat <- tibble(variable, stat[1]) %>%
+#       set_names(c("variable", "N-cluster"))
 #   } else {
-#     svy_table <- survey::svytable(c_form(right = c(by, variable)), data) %>%
+#     args$formula <- c_form(right = variable)
+#     args$by <- c_form(right = by)
+#     args$FUN <- fun
+#     stat <- do.call(survey::svyby, args)
+#     stat <- stat %>%
 #       as_tibble() %>%
-#       set_names("by", "variable_levels", "n")
+#       select(1:2) %>%
+#       set_names(c("by", "N-cluster")) %>%
+#       mutate(variable = variable)
 #   }
 #
-#   svy_table <- svy_table %>%
-#     mutate(
-#       variable = as.character(variable),
-#     )
-#
-#   # calculating percent
-#   group_by_percent <- switch(percent,
-#     "cell" = "",
-#     "column" = ifelse(!is.null(by), "by", ""),
-#     "row" = "variable_levels"
-#   )
-#
-#   svy_table <- svy_table %>%
-#     group_by(!!!syms(group_by_percent)) %>%
-#     mutate(
-#       N = sum(.data$n),
-#       # if the Big N is 0, there is no denom so making percent NA
-#       p = ifelse(.data$N == 0, NA, .data$n / .data$N)
-#     ) %>%
-#     ungroup()
-#
-#   if (!is.null(dichotomous_value)) {
-#     svy_table <- svy_table %>%
-#       filter(.data$variable_levels == !!dichotomous_value) %>%
-#       select(-.data$variable_levels)
-#   }
-#
-#   suppressMessages(
-#     df_stats <- df_stats %>%
-#       left_join(svy_table)
-#   )
-#
-#   df_stats <-
-#     df_stats %>%
-#     mutate(stat_display = .env$stat_display) %>%
-#     select(any_of(c("by", "variable", "variable_levels", "stat_display")), everything())
-#
-#   # returning final object
-#   df_stats
+#   stat
 # }
 
 # summarize_continuous for survey designs ---------------------------------------------------------
